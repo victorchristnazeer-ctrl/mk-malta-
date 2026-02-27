@@ -70,6 +70,10 @@ class Backtester {
       const evaluation = this.strategy.evaluate(window);
       if (evaluation.signal === SIGNAL.HOLD) continue;
 
+      // Minimum confidence filter – skip low-quality signals
+      const minConf = this.config.risk.minConfidence || 0;
+      if (evaluation.confidence < minConf) continue;
+
       const side = evaluation.signal;
       const { quantity } = riskManager.calculatePositionSize(portfolio.balance, currentPrice);
       if (quantity <= 0) continue;

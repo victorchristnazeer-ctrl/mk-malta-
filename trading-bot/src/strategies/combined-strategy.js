@@ -5,14 +5,16 @@ const MacdStrategy = require('./macd-strategy');
 const BollingerStrategy = require('./bollinger-strategy');
 
 /**
- * Combined Strategy
+ * Combined Strategy – High Win Rate Mode
  * Requires multiple strategy confirmations before entering a trade.
- * This reduces false signals and improves win rate.
+ * With 3/4 confirmations + trend filters on each strategy,
+ * only the highest-probability setups trigger entries.
  */
 class CombinedStrategy extends BaseStrategy {
   constructor(params = {}, allParams = {}) {
     super('Combined', params);
-    this.minConfirmations = params.minConfirmations || 2;
+    this.minConfirmations = params.minConfirmations || 3;
+    this.minConfidence = params.minConfidence || 15;
 
     this.strategies = [
       new EmaCrossoverStrategy(allParams.ema_crossover || {}),
@@ -38,27 +40,42 @@ class CombinedStrategy extends BaseStrategy {
       .map((r) => `${r.name}: ${r.signal} (${r.confidence}%) - ${r.reason}`)
       .join(' | ');
 
-    // Buy if enough strategies agree
+    // Buy if enough strategies agree with sufficient confidence
     if (buyCount >= this.minConfirmations && buyCount > sellCount) {
       const avgConfidence = Math.round(
         buySignals.reduce((sum, s) => sum + s.confidence, 0) / buyCount
       );
+      // Require minimum average confidence from agreeing strategies
+      if (avgConfidence < this.minConfidence) {
+        return {
+          signal: SIGNAL.HOLD,
+          confidence: 0,
+          reason: `Buy confirmed but low confidence (${avgConfidence}% < ${this.minConfidence}%) [${details}]`,
+        };
+      }
       return {
         signal: SIGNAL.BUY,
         confidence: avgConfidence,
-        reason: `${buyCount}/${this.strategies.length} strategies agree on BUY [${details}]`,
+        reason: `${buyCount}/${this.strategies.length} strategies agree on BUY (avg conf: ${avgConfidence}%) [${details}]`,
       };
     }
 
-    // Sell if enough strategies agree
+    // Sell if enough strategies agree with sufficient confidence
     if (sellCount >= this.minConfirmations && sellCount > buyCount) {
       const avgConfidence = Math.round(
         sellSignals.reduce((sum, s) => sum + s.confidence, 0) / sellCount
       );
+      if (avgConfidence < this.minConfidence) {
+        return {
+          signal: SIGNAL.HOLD,
+          confidence: 0,
+          reason: `Sell confirmed but low confidence (${avgConfidence}% < ${this.minConfidence}%) [${details}]`,
+        };
+      }
       return {
         signal: SIGNAL.SELL,
         confidence: avgConfidence,
-        reason: `${sellCount}/${this.strategies.length} strategies agree on SELL [${details}]`,
+        reason: `${sellCount}/${this.strategies.length} strategies agree on SELL (avg conf: ${avgConfidence}%) [${details}]`,
       };
     }
 

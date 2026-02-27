@@ -117,6 +117,11 @@ class TradingEngine {
     }
 
     if (evaluation.signal === SIGNAL.HOLD) return;
+
+    // Minimum confidence filter
+    const minConf = this.config.risk.minConfidence || 0;
+    if (evaluation.confidence < minConf) return;
+
     if (!this.riskManager.canOpenPosition(this.portfolio.positions.length)) return;
 
     const side = evaluation.signal;

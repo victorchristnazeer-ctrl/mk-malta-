@@ -227,7 +227,7 @@ class LiveTradingEngine {
       }
     }
     const result = this.portfolio.closePosition(pos.id, currentPrice, reason);
-    if (result) this.riskManager.recordPnL(result.pnl, this.portfolio.balance);
+    if (result) this.riskManager.recordPnL(result.pnl, this.portfolio.getTotalValue(currentPrice));
   }
 
   /**

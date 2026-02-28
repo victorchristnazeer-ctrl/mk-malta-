@@ -49,15 +49,14 @@ class Portfolio {
     const position = this.positions[idx];
     this.positions.splice(idx, 1);
 
-    const exitValue = currentPrice * position.quantity;
-    this.balance += exitValue;
-
     let pnl;
     if (position.side === 'BUY') {
       pnl = (currentPrice - position.entryPrice) * position.quantity;
     } else {
       pnl = (position.entryPrice - currentPrice) * position.quantity;
     }
+    // Return the original cost + profit/loss to balance
+    this.balance += position.value + pnl;
     const pnlPct = (pnl / position.value) * 100;
 
     const trade = {
@@ -81,7 +80,11 @@ class Portfolio {
    */
   getTotalValue(currentPrice) {
     const unrealized = this.positions.reduce((sum, p) => {
-      return sum + currentPrice * p.quantity;
+      // Each open position ties up p.value (entry cost) and has unrealized PnL
+      const pnl = p.side === 'BUY'
+        ? (currentPrice - p.entryPrice) * p.quantity
+        : (p.entryPrice - currentPrice) * p.quantity;
+      return sum + p.value + pnl;
     }, 0);
     return this.balance + unrealized;
   }

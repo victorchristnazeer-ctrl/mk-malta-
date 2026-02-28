@@ -2,10 +2,10 @@ const { BaseStrategy, SIGNAL } = require('./base-strategy');
 const { bollingerBands, ema } = require('../utils/indicators');
 
 /**
- * Bollinger Bands Mean-Reversion Strategy with Trend Filter
- * BUY  when price bounces off lower band AND trend is up (buy the dip)
- * SELL when price rejects upper band AND trend is down (sell the rip)
- * Requires 2-candle confirmation: touch band, then reverse.
+ * Bollinger Bands Mean-Reversion Strategy
+ * BUY  when price bounces off lower band with momentum confirmation
+ * SELL when price rejects upper band with momentum confirmation
+ * Uses middle band and trend as quality filters rather than hard gates.
  */
 class BollingerStrategy extends BaseStrategy {
   constructor(params = {}) {
@@ -42,35 +42,42 @@ class BollingerStrategy extends BaseStrategy {
     }
 
     const bandwidth = currUpper - currLower;
-    const aboveTrend = currClose > currTrend;
-    const belowTrend = currClose < currTrend;
 
-    // 2-candle lower band bounce + uptrend confirmation
-    // prev2 was at/below lower band, prev bounced, current confirms upward
+    // 2-candle lower band bounce: touched lower band, now bouncing up
     const lowerBandTouch = prev2Close <= prev2Lower || prevClose <= prevLower;
     const bouncingUp = currClose > prevClose && currClose > currLower;
 
-    if (lowerBandTouch && bouncingUp && aboveTrend) {
+    if (lowerBandTouch && bouncingUp) {
       const distFromLow = (currClose - currLower) / bandwidth;
-      const confidence = Math.min(Math.round(distFromLow * 80 + 20), 100);
+      let confidence = Math.min(Math.round(distFromLow * 80 + 20), 100);
+      // Boost confidence if price is moving back toward middle band (mean-reversion working)
+      if (currClose < currMiddle) confidence = Math.min(confidence + 10, 100);
+      // Boost if long-term trend is not strongly down
+      const trendDist = ((currClose - currTrend) / currTrend) * 100;
+      if (trendDist > -3) confidence = Math.min(confidence + 10, 100);
       return {
         signal: SIGNAL.BUY,
         confidence: Math.max(confidence, 15),
-        reason: `Bollinger lower band bounce confirmed, uptrend`,
+        reason: `Bollinger lower band bounce confirmed`,
       };
     }
 
-    // 2-candle upper band rejection + downtrend confirmation
+    // 2-candle upper band rejection: touched upper band, now dropping
     const upperBandTouch = prev2Close >= prev2Upper || prevClose >= prevUpper;
     const droppingDown = currClose < prevClose && currClose < currUpper;
 
-    if (upperBandTouch && droppingDown && belowTrend) {
+    if (upperBandTouch && droppingDown) {
       const distFromHigh = (currUpper - currClose) / bandwidth;
-      const confidence = Math.min(Math.round(distFromHigh * 80 + 20), 100);
+      let confidence = Math.min(Math.round(distFromHigh * 80 + 20), 100);
+      // Boost confidence if price is moving back toward middle band
+      if (currClose > currMiddle) confidence = Math.min(confidence + 10, 100);
+      // Boost if long-term trend is not strongly up
+      const trendDist = ((currClose - currTrend) / currTrend) * 100;
+      if (trendDist < 3) confidence = Math.min(confidence + 10, 100);
       return {
         signal: SIGNAL.SELL,
         confidence: Math.max(confidence, 15),
-        reason: `Bollinger upper band rejection confirmed, downtrend`,
+        reason: `Bollinger upper band rejection confirmed`,
       };
     }
 

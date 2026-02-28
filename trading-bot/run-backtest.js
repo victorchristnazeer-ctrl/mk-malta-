@@ -61,14 +61,14 @@ function main() {
     const backtester = new Backtester(config, strategy, logger);
     const result = backtester.run(candles, 60);
 
-    results.push({ name, ...result });
+    results.push({ name, ...result.summary });
 
     console.log(`  Strategy: ${name.toUpperCase()}`);
-    console.log(`    Return:       ${result.totalReturn}`);
-    console.log(`    Win Rate:     ${result.winRate}`);
-    console.log(`    Trades:       ${result.totalTrades}`);
-    console.log(`    Profit Factor: ${result.profitFactor}`);
-    console.log(`    Max Drawdown: ${result.maxDrawdown}`);
+    console.log(`    Return:       ${result.summary.totalReturn}`);
+    console.log(`    Win Rate:     ${result.summary.winRate}`);
+    console.log(`    Trades:       ${result.summary.totalTrades}`);
+    console.log(`    Profit Factor: ${result.summary.profitFactor}`);
+    console.log(`    Max Drawdown: ${result.summary.maxDrawdown}`);
     console.log('');
   }
 

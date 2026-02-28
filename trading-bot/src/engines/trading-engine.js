@@ -89,14 +89,14 @@ class TradingEngine {
 
       if (trailingHit && pos.trailingStop !== pos.stopLoss) {
         const result = this.portfolio.closePosition(pos.id, currentPrice, 'Trailing stop hit');
-        if (result) this.riskManager.recordPnL(result.pnl, this.portfolio.balance);
+        if (result) this.riskManager.recordPnL(result.pnl, this.portfolio.getTotalValue(currentPrice));
         continue;
       }
 
       const exit = this.riskManager.checkExitConditions(pos, currentPrice);
       if (exit.shouldClose) {
         const result = this.portfolio.closePosition(pos.id, currentPrice, exit.reason);
-        if (result) this.riskManager.recordPnL(result.pnl, this.portfolio.balance);
+        if (result) this.riskManager.recordPnL(result.pnl, this.portfolio.getTotalValue(currentPrice));
       }
     }
 

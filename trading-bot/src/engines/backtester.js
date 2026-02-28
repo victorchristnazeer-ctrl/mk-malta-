@@ -49,7 +49,7 @@ class Backtester {
 
         if (trailingHit && pos.trailingStop !== pos.stopLoss) {
           const result = portfolio.closePosition(pos.id, currentPrice, 'Trailing stop hit', currentCandle.time);
-          if (result) riskManager.recordPnL(result.pnl, portfolio.balance);
+          if (result) riskManager.recordPnL(result.pnl, portfolio.getTotalValue(currentPrice));
           continue;
         }
 
@@ -57,7 +57,7 @@ class Backtester {
         const exit = riskManager.checkExitConditions(pos, currentPrice);
         if (exit.shouldClose) {
           const result = portfolio.closePosition(pos.id, currentPrice, exit.reason, currentCandle.time);
-          if (result) riskManager.recordPnL(result.pnl, portfolio.balance);
+          if (result) riskManager.recordPnL(result.pnl, portfolio.getTotalValue(currentPrice));
         }
       }
 
@@ -102,7 +102,7 @@ class Backtester {
     const lastPrice = candles[candles.length - 1].close;
     for (const pos of [...portfolio.positions]) {
       const result = portfolio.closePosition(pos.id, lastPrice, 'End of backtest', candles[candles.length - 1].time);
-      if (result) riskManager.recordPnL(result.pnl, portfolio.balance);
+      if (result) riskManager.recordPnL(result.pnl, portfolio.getTotalValue(lastPrice));
     }
 
     const summary = portfolio.getSummary(lastPrice);

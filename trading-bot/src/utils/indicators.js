@@ -48,45 +48,43 @@ function ema(data, period) {
 }
 
 /**
- * Relative Strength Index
+ * Relative Strength Index (Wilder's smoothing method)
  */
 function rsi(data, period = 14) {
   const result = [];
-  const gains = [];
-  const losses = [];
+  let prevAvgGain = null;
+  let prevAvgLoss = null;
 
   for (let i = 0; i < data.length; i++) {
-    if (i === 0) {
-      result.push(null);
-      continue;
-    }
-    const change = data[i] - data[i - 1];
-    gains.push(change > 0 ? change : 0);
-    losses.push(change < 0 ? Math.abs(change) : 0);
-
     if (i < period) {
       result.push(null);
       continue;
     }
 
-    let avgGain, avgLoss;
-    if (i === period) {
-      avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
-      avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    if (prevAvgGain === null) {
+      // First RSI: seed with SMA of gains/losses over the initial period
+      let gainSum = 0;
+      let lossSum = 0;
+      for (let j = i - period + 1; j <= i; j++) {
+        const change = data[j] - data[j - 1];
+        gainSum += change > 0 ? change : 0;
+        lossSum += change < 0 ? Math.abs(change) : 0;
+      }
+      prevAvgGain = gainSum / period;
+      prevAvgLoss = lossSum / period;
     } else {
-      const prevRsiData = result[i - 1] === null ? 50 : result[i - 1];
-      const prevAvgLoss = prevRsiData === 100 ? 0 : 1;
-      // Use Wilder's smoothing
-      avgGain = gains.slice(Math.max(0, gains.length - period), gains.length)
-        .reduce((a, b) => a + b, 0) / period;
-      avgLoss = losses.slice(Math.max(0, losses.length - period), losses.length)
-        .reduce((a, b) => a + b, 0) / period;
+      // Wilder's smoothing: avgGain = (prev * (period-1) + currentGain) / period
+      const change = data[i] - data[i - 1];
+      const gain = change > 0 ? change : 0;
+      const loss = change < 0 ? Math.abs(change) : 0;
+      prevAvgGain = (prevAvgGain * (period - 1) + gain) / period;
+      prevAvgLoss = (prevAvgLoss * (period - 1) + loss) / period;
     }
 
-    if (avgLoss === 0) {
+    if (prevAvgLoss === 0) {
       result.push(100);
     } else {
-      const rs = avgGain / avgLoss;
+      const rs = prevAvgGain / prevAvgLoss;
       result.push(100 - 100 / (1 + rs));
     }
   }

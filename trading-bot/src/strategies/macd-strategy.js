@@ -2,10 +2,10 @@ const { BaseStrategy, SIGNAL } = require('./base-strategy');
 const { macd: calcMacd, ema } = require('../utils/indicators');
 
 /**
- * MACD Strategy with Trend Filter and Histogram Confirmation
- * BUY  when MACD crosses above signal, histogram is growing, AND trend is up
- * SELL when MACD crosses below signal, histogram is falling, AND trend is down
- * Additional: requires histogram to confirm momentum direction over 2 bars.
+ * MACD Strategy with Histogram Confirmation
+ * BUY  when MACD crosses above signal with growing histogram momentum
+ * SELL when MACD crosses below signal with falling histogram momentum
+ * Trend is used as a confidence booster, not a hard gate.
  */
 class MacdStrategy extends BaseStrategy {
   constructor(params = {}) {
@@ -44,32 +44,33 @@ class MacdStrategy extends BaseStrategy {
       return { signal: SIGNAL.HOLD, confidence: 0, reason: 'Indicator warming up' };
     }
 
-    const aboveTrend = currPrice > currTrend;
-    const belowTrend = currPrice < currTrend;
     const histGrowing = currHist > prevHist;
     const histFalling = currHist < prevHist;
+    const trendDist = ((currPrice - currTrend) / currTrend) * 100;
 
-    // Bullish crossover + growing histogram + above trend
-    if (prevMacd <= prevSignal && currMacd > currSignal && histGrowing && aboveTrend) {
+    // Bullish crossover + growing histogram
+    if (prevMacd <= prevSignal && currMacd > currSignal && histGrowing) {
       const strength = Math.abs(currHist) * 100;
-      const trendBonus = ((currPrice - currTrend) / currTrend) * 200;
-      const confidence = Math.min(Math.round(strength + trendBonus), 100);
+      let confidence = Math.min(Math.round(strength + 15), 100);
+      // Boost confidence when aligned with trend
+      if (trendDist > 0) confidence = Math.min(confidence + 15, 100);
       return {
         signal: SIGNAL.BUY,
         confidence: Math.max(confidence, 15),
-        reason: `MACD bullish crossover, momentum growing, uptrend (hist: ${currHist.toFixed(4)})`,
+        reason: `MACD bullish crossover, momentum growing (hist: ${currHist.toFixed(4)})`,
       };
     }
 
-    // Bearish crossover + falling histogram + below trend
-    if (prevMacd >= prevSignal && currMacd < currSignal && histFalling && belowTrend) {
+    // Bearish crossover + falling histogram
+    if (prevMacd >= prevSignal && currMacd < currSignal && histFalling) {
       const strength = Math.abs(currHist) * 100;
-      const trendBonus = ((currTrend - currPrice) / currTrend) * 200;
-      const confidence = Math.min(Math.round(strength + trendBonus), 100);
+      let confidence = Math.min(Math.round(strength + 15), 100);
+      // Boost confidence when aligned with trend
+      if (trendDist < 0) confidence = Math.min(confidence + 15, 100);
       return {
         signal: SIGNAL.SELL,
         confidence: Math.max(confidence, 15),
-        reason: `MACD bearish crossover, momentum falling, downtrend (hist: ${currHist.toFixed(4)})`,
+        reason: `MACD bearish crossover, momentum falling (hist: ${currHist.toFixed(4)})`,
       };
     }
 

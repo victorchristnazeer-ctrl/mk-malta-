@@ -22,14 +22,14 @@ module.exports = {
   // ── Strategy parameters ───────────────────────────────────────────
   strategies: {
     ema_crossover: {
-      fastPeriod: 9,
+      fastPeriod: 8,
       slowPeriod: 21,
       trendPeriod: 50,            // long EMA for trend confirmation filter
     },
     rsi: {
       period: 14,
-      overbought: 75,             // stricter – only extreme overbought
-      oversold: 25,               // stricter – only extreme oversold
+      overbought: 70,             // standard overbought threshold
+      oversold: 30,               // standard oversold threshold
       trendPeriod: 50,
     },
     macd: {
@@ -51,15 +51,15 @@ module.exports = {
 
   // ── Risk management ───────────────────────────────────────────────
   risk: {
-    maxPositionSizePct: 1.5,      // smaller positions = less risk per trade
-    stopLossPct: 5,               // wide stop-loss – room to breathe
-    takeProfitPct: 2,             // tight take-profit – grabs frequent wins
-    trailingStopPct: 3.5,         // wide trailing stop – avoid noise exits
-    maxOpenPositions: 2,          // fewer concurrent = more selective
-    maxDailyLossPct: 6,           // daily loss limit
-    maxDrawdownPct: 20,           // max total drawdown before halting
-    riskRewardRatio: 0.4,         // allow asymmetric R:R (high win rate compensates)
-    minConfidence: 5,             // minimum strategy confidence to enter trade
+    maxPositionSizePct: 2,        // risk 2% of portfolio per trade
+    stopLossPct: 2,               // tight stop-loss – cut losses quickly
+    takeProfitPct: 4,             // 2:1 reward-to-risk ratio
+    trailingStopPct: 1.5,         // tight trailing stop – lock in profits
+    maxOpenPositions: 3,          // allow up to 3 concurrent positions
+    maxDailyLossPct: 5,           // daily loss limit
+    maxDrawdownPct: 15,           // max total drawdown before halting
+    riskRewardRatio: 1.5,         // only take trades with favorable R:R
+    minConfidence: 10,            // minimum strategy confidence to enter trade
   },
 
   // ── Execution ─────────────────────────────────────────────────────

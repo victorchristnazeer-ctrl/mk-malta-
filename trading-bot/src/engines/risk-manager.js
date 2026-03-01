@@ -20,12 +20,18 @@ class RiskManager {
   /**
    * Reset daily P&L if a new day has started.
    */
-  checkDayRollover() {
+  checkDayRollover(currentBalance) {
     const today = this._today();
     if (today !== this.dailyResetDate) {
       this.log.info(`New trading day: ${today} – resetting daily P&L (was ${this.dailyPnL.toFixed(2)})`);
       this.dailyPnL = 0;
       this.dailyResetDate = today;
+      // Reset peak balance to current balance at start of new day
+      // This prevents yesterday's drawdown from carrying over
+      if (currentBalance && currentBalance > 0) {
+        this.peakBalance = currentBalance;
+        this.log.debug(`Peak balance reset to ${currentBalance.toFixed(2)} for new trading day`);
+      }
       // Un-halt if it was a daily-loss halt
       if (this.haltReason === 'daily_loss') {
         this.halted = false;
@@ -44,10 +50,28 @@ class RiskManager {
 
   /**
    * Calculate position size (in quote currency, e.g. USDT) for a trade.
+   * If candles are provided, uses ATR-based adaptive sizing to reduce
+   * exposure during high-volatility periods.
    */
-  calculatePositionSize(balance, currentPrice) {
+  calculatePositionSize(balance, currentPrice, candles) {
     const maxPct = this.config.risk.maxPositionSizePct / 100;
-    const riskAmount = balance * maxPct;
+    let riskAmount = balance * maxPct;
+
+    // ATR-based adaptive sizing: scale down when volatility is high
+    if (candles && candles.length >= 20) {
+      const atrVal = this._calculateATR(candles, 14);
+      if (atrVal > 0) {
+        const atrPct = atrVal / currentPrice;
+        // Baseline ATR ~1.5% for crypto hourly candles
+        const baselineATR = 0.015;
+        const volRatio = atrPct / baselineATR;
+        // Scale risk inversely with volatility (clamp between 0.5x and 1.5x)
+        const volScalar = Math.max(0.5, Math.min(1.5, 1 / volRatio));
+        riskAmount *= volScalar;
+        this.log.debug(`ATR adaptive sizing: ATR=${(atrPct * 100).toFixed(2)}% volScalar=${volScalar.toFixed(2)}`);
+      }
+    }
+
     const stopLossPct = this.config.risk.stopLossPct / 100;
     // Size position so that a stop-loss hit only loses riskAmount
     const positionValue = riskAmount / stopLossPct;
@@ -58,6 +82,24 @@ class RiskManager {
 
     this.log.debug(`Position sizing: balance=${balance.toFixed(2)} risk=${riskAmount.toFixed(2)} size=${finalValue.toFixed(2)} qty=${quantity.toFixed(6)}`);
     return { quantity, value: finalValue };
+  }
+
+  /**
+   * Calculate current ATR from candle data.
+   */
+  _calculateATR(candles, period = 14) {
+    if (candles.length < period + 1) return 0;
+    const recent = candles.slice(-period - 1);
+    let atrSum = 0;
+    for (let i = 1; i < recent.length; i++) {
+      const tr = Math.max(
+        recent[i].high - recent[i].low,
+        Math.abs(recent[i].high - recent[i - 1].close),
+        Math.abs(recent[i].low - recent[i - 1].close)
+      );
+      atrSum += tr;
+    }
+    return atrSum / period;
   }
 
   /**

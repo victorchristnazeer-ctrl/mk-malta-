@@ -42,40 +42,36 @@ class CombinedStrategy extends BaseStrategy {
 
     // Buy if enough strategies agree with sufficient confidence
     if (buyCount >= this.minConfirmations && buyCount > sellCount) {
-      const avgConfidence = Math.round(
-        buySignals.reduce((sum, s) => sum + s.confidence, 0) / buyCount
-      );
-      // Require minimum average confidence from agreeing strategies
-      if (avgConfidence < this.minConfidence) {
+      const medianConfidence = this._median(buySignals.map(s => s.confidence));
+      // Require minimum median confidence from agreeing strategies
+      if (medianConfidence < this.minConfidence) {
         return {
           signal: SIGNAL.HOLD,
           confidence: 0,
-          reason: `Buy confirmed but low confidence (${avgConfidence}% < ${this.minConfidence}%) [${details}]`,
+          reason: `Buy confirmed but low confidence (${medianConfidence}% < ${this.minConfidence}%) [${details}]`,
         };
       }
       return {
         signal: SIGNAL.BUY,
-        confidence: avgConfidence,
-        reason: `${buyCount}/${this.strategies.length} strategies agree on BUY (avg conf: ${avgConfidence}%) [${details}]`,
+        confidence: medianConfidence,
+        reason: `${buyCount}/${this.strategies.length} strategies agree on BUY (median conf: ${medianConfidence}%) [${details}]`,
       };
     }
 
     // Sell if enough strategies agree with sufficient confidence
     if (sellCount >= this.minConfirmations && sellCount > buyCount) {
-      const avgConfidence = Math.round(
-        sellSignals.reduce((sum, s) => sum + s.confidence, 0) / sellCount
-      );
-      if (avgConfidence < this.minConfidence) {
+      const medianConfidence = this._median(sellSignals.map(s => s.confidence));
+      if (medianConfidence < this.minConfidence) {
         return {
           signal: SIGNAL.HOLD,
           confidence: 0,
-          reason: `Sell confirmed but low confidence (${avgConfidence}% < ${this.minConfidence}%) [${details}]`,
+          reason: `Sell confirmed but low confidence (${medianConfidence}% < ${this.minConfidence}%) [${details}]`,
         };
       }
       return {
         signal: SIGNAL.SELL,
-        confidence: avgConfidence,
-        reason: `${sellCount}/${this.strategies.length} strategies agree on SELL (avg conf: ${avgConfidence}%) [${details}]`,
+        confidence: medianConfidence,
+        reason: `${sellCount}/${this.strategies.length} strategies agree on SELL (median conf: ${medianConfidence}%) [${details}]`,
       };
     }
 
@@ -84,6 +80,15 @@ class CombinedStrategy extends BaseStrategy {
       confidence: 0,
       reason: `Insufficient confirmations (buy:${buyCount} sell:${sellCount} need:${this.minConfirmations}) [${details}]`,
     };
+  }
+
+  _median(values) {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0
+      ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+      : sorted[mid];
   }
 }
 

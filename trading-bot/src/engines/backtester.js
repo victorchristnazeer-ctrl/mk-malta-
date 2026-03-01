@@ -10,6 +10,35 @@ class Backtester {
     this.config = config;
     this.strategy = strategy;
     this.log = logger;
+    // Trading cost simulation (basis points)
+    const costs = config.tradingCosts || {};
+    this.slippageBps = costs.slippageBps || 3;        // 3 bps slippage per side
+    this.spreadBps = costs.spreadBps || 2;             // 2 bps half-spread
+    this.commissionBps = costs.commissionBps || 10;    // 10 bps (0.1%) Binance taker fee
+    this.stopSlippageBps = costs.stopSlippageBps || 8; // extra slippage on stop fills
+  }
+
+  /**
+   * Apply trading costs to an entry price (worse fill).
+   */
+  _applyEntryCost(price, side) {
+    const totalBps = this.slippageBps + this.spreadBps + this.commissionBps;
+    const costMult = totalBps / 10000;
+    return side === 'BUY'
+      ? price * (1 + costMult)   // pay more when buying
+      : price * (1 - costMult);  // receive less when selling
+  }
+
+  /**
+   * Apply trading costs to an exit price (worse fill).
+   */
+  _applyExitCost(price, side, isStopLoss = false) {
+    const extra = isStopLoss ? this.stopSlippageBps : 0;
+    const totalBps = this.slippageBps + this.spreadBps + this.commissionBps + extra;
+    const costMult = totalBps / 10000;
+    return side === 'BUY'
+      ? price * (1 - costMult)   // receive less when closing a long
+      : price * (1 + costMult);  // pay more when closing a short
   }
 
   /**
@@ -30,6 +59,8 @@ class Backtester {
     this.log.info(`Candles: ${candles.length} | Initial balance: $${this.config.initialBalance}`);
     this.log.info(`${'='.repeat(60)}\n`);
 
+    const maxBarsInTrade = this.config.risk.maxBarsInTrade || 100;
+
     for (let i = lookback; i < candles.length; i++) {
       const window = candles.slice(0, i + 1);
       const currentCandle = candles[i];
@@ -37,6 +68,47 @@ class Backtester {
 
       // Check & close existing positions
       for (const pos of [...portfolio.positions]) {
+        // Stale position check: auto-close if held too long without movement
+        const barsHeld = (pos._entryBar !== undefined) ? i - pos._entryBar : 0;
+        if (barsHeld >= maxBarsInTrade) {
+          const exitPrice = this._applyExitCost(currentPrice, pos.side, false);
+          const result = portfolio.closePosition(pos.id, exitPrice, `Stale position (${barsHeld} bars)`, currentCandle.time);
+          if (result) riskManager.recordPnL(result.pnl, portfolio.getTotalValue(currentPrice));
+          continue;
+        }
+
+        // Profit-taking tiers: close 50% at 1.5x risk (partial take-profit)
+        if (!pos._partialTaken && pos.side === 'BUY') {
+          const partialTP = pos.entryPrice * (1 + (this.config.risk.takeProfitPct / 100) * 0.5);
+          if (currentPrice >= partialTP) {
+            const halfQty = pos.quantity * 0.5;
+            const exitPrice = this._applyExitCost(currentPrice, pos.side, false);
+            const partialPnl = (exitPrice - pos.entryPrice) * halfQty;
+            portfolio.balance += pos.entryPrice * halfQty + partialPnl;
+            pos.quantity -= halfQty;
+            pos.value = pos.entryPrice * pos.quantity;
+            pos._partialTaken = true;
+            // Tighten stop to breakeven after partial take
+            pos.stopLoss = pos.entryPrice;
+            pos.trailingStop = Math.max(pos.trailingStop, pos.entryPrice);
+            this.log.debug(`Partial profit taken: 50% closed at ${currentPrice.toFixed(2)}, stop moved to breakeven`);
+          }
+        } else if (!pos._partialTaken && pos.side === 'SELL') {
+          const partialTP = pos.entryPrice * (1 - (this.config.risk.takeProfitPct / 100) * 0.5);
+          if (currentPrice <= partialTP) {
+            const halfQty = pos.quantity * 0.5;
+            const exitPrice = this._applyExitCost(currentPrice, pos.side, false);
+            const partialPnl = (pos.entryPrice - exitPrice) * halfQty;
+            portfolio.balance += pos.entryPrice * halfQty + partialPnl;
+            pos.quantity -= halfQty;
+            pos.value = pos.entryPrice * pos.quantity;
+            pos._partialTaken = true;
+            pos.stopLoss = pos.entryPrice;
+            pos.trailingStop = Math.min(pos.trailingStop, pos.entryPrice);
+            this.log.debug(`Partial profit taken: 50% closed at ${currentPrice.toFixed(2)}, stop moved to breakeven`);
+          }
+        }
+
         // Update trailing stop
         pos.trailingStop = riskManager.updateTrailingStop(
           currentPrice, pos.trailingStop, pos.side
@@ -48,7 +120,8 @@ class Backtester {
           : currentPrice >= pos.trailingStop;
 
         if (trailingHit && pos.trailingStop !== pos.stopLoss) {
-          const result = portfolio.closePosition(pos.id, currentPrice, 'Trailing stop hit', currentCandle.time);
+          const exitPrice = this._applyExitCost(currentPrice, pos.side, false);
+          const result = portfolio.closePosition(pos.id, exitPrice, 'Trailing stop hit', currentCandle.time);
           if (result) riskManager.recordPnL(result.pnl, portfolio.getTotalValue(currentPrice));
           continue;
         }
@@ -56,13 +129,15 @@ class Backtester {
         // Check stop-loss / take-profit
         const exit = riskManager.checkExitConditions(pos, currentPrice);
         if (exit.shouldClose) {
-          const result = portfolio.closePosition(pos.id, currentPrice, exit.reason, currentCandle.time);
+          const isStop = exit.reason === 'Stop-loss hit';
+          const exitPrice = this._applyExitCost(currentPrice, pos.side, isStop);
+          const result = portfolio.closePosition(pos.id, exitPrice, exit.reason, currentCandle.time);
           if (result) riskManager.recordPnL(result.pnl, portfolio.getTotalValue(currentPrice));
         }
       }
 
       // Check if risk manager allows new positions
-      riskManager.checkDayRollover();
+      riskManager.checkDayRollover(portfolio.getTotalValue(currentPrice));
       if (riskManager.isHalted()) continue;
       if (!riskManager.canOpenPosition(portfolio.positions.length)) continue;
 
@@ -75,7 +150,7 @@ class Backtester {
       if (evaluation.confidence < minConf) continue;
 
       const side = evaluation.signal;
-      const { quantity } = riskManager.calculatePositionSize(portfolio.balance, currentPrice);
+      const { quantity } = riskManager.calculatePositionSize(portfolio.balance, currentPrice, window);
       if (quantity <= 0) continue;
 
       const stopLoss = riskManager.getStopLoss(currentPrice, side);
@@ -87,21 +162,26 @@ class Backtester {
         continue;
       }
 
-      portfolio.openPosition({
+      // Apply slippage/spread/commission to entry price
+      const entryPrice = this._applyEntryCost(currentPrice, side);
+
+      const newPos = portfolio.openPosition({
         side,
-        price: currentPrice,
+        price: entryPrice,
         quantity,
         stopLoss,
         takeProfit,
         reason: evaluation.reason,
         time: currentCandle.time,
       });
+      if (newPos) newPos._entryBar = i;
     }
 
-    // Close any remaining positions at last price
+    // Close any remaining positions at last price (with exit costs)
     const lastPrice = candles[candles.length - 1].close;
     for (const pos of [...portfolio.positions]) {
-      const result = portfolio.closePosition(pos.id, lastPrice, 'End of backtest', candles[candles.length - 1].time);
+      const exitPrice = this._applyExitCost(lastPrice, pos.side, false);
+      const result = portfolio.closePosition(pos.id, exitPrice, 'End of backtest', candles[candles.length - 1].time);
       if (result) riskManager.recordPnL(result.pnl, portfolio.getTotalValue(lastPrice));
     }
 

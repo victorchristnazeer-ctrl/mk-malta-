@@ -152,7 +152,7 @@ class LiveTradingEngine {
     }
 
     // Check risk limits
-    this.riskManager.checkDayRollover();
+    this.riskManager.checkDayRollover(this.portfolio.getTotalValue(currentPrice));
     if (this.riskManager.isHalted()) {
       if (this.tickCount % 10 === 0) {
         this.log.warn('Trading halted by risk manager');
@@ -175,7 +175,7 @@ class LiveTradingEngine {
     if (!this.riskManager.canOpenPosition(this.portfolio.positions.length)) return;
 
     const side = evaluation.signal;
-    const { quantity } = this.riskManager.calculatePositionSize(this.portfolio.balance, currentPrice);
+    const { quantity } = this.riskManager.calculatePositionSize(this.portfolio.balance, currentPrice, this.candles);
     if (quantity <= 0) return;
 
     const stopLoss = this.riskManager.getStopLoss(currentPrice, side);

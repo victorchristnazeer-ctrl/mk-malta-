@@ -19,10 +19,12 @@ app.use((req, res, next) => {
 });
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-const PORT           = process.env.PORT         || 3000;
-const VERIFY_TOKEN   = process.env.VERIFY_TOKEN || 'mk_malta_verify_2024';
+const PORT           = process.env.PORT              || 3000;
+const VERIFY_TOKEN   = process.env.VERIFY_TOKEN      || 'mk_malta_verify_2024';
 const SUPABASE_URL   = process.env.SUPABASE_URL;
 const SUPABASE_KEY   = process.env.SUPABASE_KEY;
+const PHONE_ID       = process.env.WHATSAPP_PHONE_ID;
+const WA_TOKEN       = process.env.WHATSAPP_TOKEN;
 
 // ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
 const { createClient } = require('@supabase/supabase-js');
@@ -199,12 +201,60 @@ app.get('/api/stats', async (req, res) => {
   });
 });
 
+// ─── API: Send message ────────────────────────────────────────────────────────
+app.post('/api/send', async (req, res) => {
+  const { phone, message } = req.body;
+  if (!phone || !message) return res.status(400).json({ ok: false, error: 'phone and message required' });
+  if (!PHONE_ID || !WA_TOKEN) return res.status(500).json({ ok: false, error: 'WhatsApp credentials not configured' });
+
+  try {
+    const response = await fetch(
+      `https://graph.facebook.com/v19.0/${PHONE_ID}/messages`,
+      {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${WA_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: phone,
+          type: 'text',
+          text: { body: message },
+        }),
+      }
+    );
+    const data = await response.json();
+    if (!response.ok) return res.status(400).json({ ok: false, error: data });
+
+    const msgId    = data.messages?.[0]?.id || Date.now().toString();
+    const timestamp = Date.now();
+
+    // Store outbound message
+    await supabase.from('wa_threads').upsert(
+      { phone, contact_name: phone, last_message: message, last_time: timestamp },
+      { onConflict: 'phone' }
+    );
+    await supabase.from('wa_messages').insert({
+      id: msgId, phone, direction: 'outbound', from_name: 'MK Malta Jobs',
+      text: message, type: 'text', status: 'sent', timestamp, time_iso: new Date(timestamp).toISOString(),
+    });
+
+    res.json({ ok: true, message_id: msgId });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ─── HEALTH ───────────────────────────────────────────────────────────────────
 app.get('/', async (req, res) => {
   const { count } = await supabase
     .from('wa_threads')
     .select('phone', { count: 'exact', head: true });
-  res.json({ service: 'MK Malta Jobs — WhatsApp Webhook', status: 'running', contacts: count || 0 });
+  res.json({
+    service:      'MK Malta Jobs — WhatsApp Webhook',
+    status:       'running',
+    contacts:     count || 0,
+    supabase:     !!SUPABASE_URL,
+    whatsapp:     !!PHONE_ID && !!WA_TOKEN,
+  });
 });
 
 // ─── START ────────────────────────────────────────────────────────────────────

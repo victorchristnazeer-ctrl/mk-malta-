@@ -1,0 +1,16 @@
+{
+  "name": "mk-malta-webhook",
+  "version": "3.0.0",
+  "description": "Meta WhatsApp webhook receiver for MK Malta Jobs — Supabase storage",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

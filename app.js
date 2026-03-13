@@ -245,14 +245,25 @@ app.post('/api/send', async (req, res) => {
 
 // ─── DEBUG ────────────────────────────────────────────────────────────────────
 app.get('/debug', async (req, res) => {
-  const { data, error, count } = await supabase
-    .from('wa_threads')
-    .select('*', { count: 'exact' });
+  // Test read
+  const { data, error: readErr, count } = await supabase
+    .from('wa_threads').select('*', { count: 'exact' });
+
+  // Test write
+  const { error: writeErr } = await supabase.from('wa_threads').upsert({
+    phone:        'debug_test',
+    contact_name: 'Debug Test',
+    last_message: 'write test at ' + new Date().toISOString(),
+    last_time:    Date.now(),
+    unread:       0,
+  }, { onConflict: 'phone' });
+
   res.json({
-    supabase_url:   SUPABASE_URL,
-    has_key:        !!SUPABASE_KEY,
-    error:          error?.message || null,
-    rows:           data,
+    supabase_url: SUPABASE_URL,
+    has_key:      !!SUPABASE_KEY,
+    read_error:   readErr?.message || null,
+    write_error:  writeErr?.message || null,
+    rows:         data,
     count,
   });
 });

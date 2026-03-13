@@ -243,6 +243,20 @@ app.post('/api/send', async (req, res) => {
   }
 });
 
+// ─── DEBUG ────────────────────────────────────────────────────────────────────
+app.get('/debug', async (req, res) => {
+  const { data, error, count } = await supabase
+    .from('wa_threads')
+    .select('*', { count: 'exact' });
+  res.json({
+    supabase_url:   SUPABASE_URL,
+    has_key:        !!SUPABASE_KEY,
+    error:          error?.message || null,
+    rows:           data,
+    count,
+  });
+});
+
 // ─── HEALTH ───────────────────────────────────────────────────────────────────
 app.get('/', async (req, res) => {
   const { count } = await supabase

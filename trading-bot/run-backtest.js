@@ -25,6 +25,7 @@ const RsiStrategy = require('./src/strategies/rsi-strategy');
 const MacdStrategy = require('./src/strategies/macd-strategy');
 const BollingerStrategy = require('./src/strategies/bollinger-strategy');
 const CombinedStrategy = require('./src/strategies/combined-strategy');
+const LuxAlgoHAStrategy = require('./src/strategies/luxalgo-ha-strategy');
 
 const logger = new Logger('info');
 
@@ -34,6 +35,7 @@ const allStrategies = {
   macd: () => new MacdStrategy(config.strategies.macd),
   bollinger: () => new BollingerStrategy(config.strategies.bollinger),
   combined: () => new CombinedStrategy(config.strategies.combined, config.strategies),
+  luxalgo_ha: () => new LuxAlgoHAStrategy(config.strategies.luxalgo_ha || {}),
 };
 
 async function main() {

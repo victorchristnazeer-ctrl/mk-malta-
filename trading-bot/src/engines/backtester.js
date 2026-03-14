@@ -78,8 +78,13 @@ class Backtester {
       const { quantity } = riskManager.calculatePositionSize(portfolio.balance, currentPrice);
       if (quantity <= 0) continue;
 
-      const stopLoss = riskManager.getStopLoss(currentPrice, side);
-      const takeProfit = riskManager.getTakeProfit(currentPrice, side);
+      // Use strategy-supplied ATR-based SL/TP if available, else fall back to config
+      const stopLoss = evaluation.slPct
+        ? (side === 'BUY' ? currentPrice * (1 - evaluation.slPct) : currentPrice * (1 + evaluation.slPct))
+        : riskManager.getStopLoss(currentPrice, side);
+      const takeProfit = evaluation.tpPct
+        ? (side === 'BUY' ? currentPrice * (1 + evaluation.tpPct) : currentPrice * (1 - evaluation.tpPct))
+        : riskManager.getTakeProfit(currentPrice, side);
 
       // Check risk/reward
       if (!riskManager.meetsRiskReward(currentPrice, stopLoss, takeProfit)) {

@@ -26,6 +26,9 @@ const SUPABASE_KEY   = process.env.SUPABASE_KEY;
 const PHONE_ID       = process.env.WHATSAPP_PHONE_ID;
 const WA_TOKEN       = process.env.WHATSAPP_TOKEN;
 
+// ─── LAST WEBHOOK STORE (debug) ───────────────────────────────────────────────
+let lastWebhook = null;
+
 // ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
 const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -79,6 +82,8 @@ app.get('/webhook', (req, res) => {
 // ─── WEBHOOK EVENT RECEIVER ───────────────────────────────────────────────────
 app.post('/webhook', async (req, res) => {
   const body = req.body;
+  lastWebhook = { received_at: new Date().toISOString(), body };
+  console.log('WEBHOOK:', JSON.stringify(body));
   if (body.object !== 'whatsapp_business_account') return res.sendStatus(404);
 
   for (const entry of body.entry || []) {
@@ -241,6 +246,11 @@ app.post('/api/send', async (req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+// ─── LAST WEBHOOK ENDPOINT ────────────────────────────────────────────────────
+app.get('/last-webhook', (req, res) => {
+  res.json(lastWebhook || { message: 'No webhook received yet' });
 });
 
 // ─── DEBUG ────────────────────────────────────────────────────────────────────

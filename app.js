@@ -1,5 +1,5 @@
 /**
- * MK Malta Jobs — Meta WhatsApp Cloud API Webhook
+ * MK Malta Jobs — tawk.to Webhook Receiver
  * Deployed on: https://mk-malta.onrender.com
  * Storage: Supabase (persistent)
  */
@@ -9,7 +9,7 @@ const app     = express();
 
 app.use(express.json());
 
-// ─── CORS (dashboard access) ──────────────────────────────────────────────────
+// ─── CORS ─────────────────────────────────────────────────────────────────────
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -19,121 +19,111 @@ app.use((req, res, next) => {
 });
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-const PORT           = process.env.PORT              || 3000;
-const VERIFY_TOKEN   = process.env.VERIFY_TOKEN      || 'mk_malta_verify_2024';
-const SUPABASE_URL   = process.env.SUPABASE_URL;
-const SUPABASE_KEY   = process.env.SUPABASE_KEY;
-const PHONE_ID       = process.env.WHATSAPP_PHONE_ID;
-const WA_TOKEN       = process.env.WHATSAPP_TOKEN;
+const PORT         = process.env.PORT       || 3000;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
-// ─── LAST WEBHOOK STORE (debug) ───────────────────────────────────────────────
-let lastWebhook = null;
-
-// ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
+// ─── SUPABASE ─────────────────────────────────────────────────────────────────
 const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ─── LAST WEBHOOK (debug) ─────────────────────────────────────────────────────
+let lastWebhook = null;
+
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-async function upsertThread(phone, name, text, timestamp) {
+async function upsertChat(chatId, visitorName, agentName, lastMsg, ts) {
   const { error } = await supabase.from('wa_threads').upsert({
-    phone,
-    contact_name: name || phone,
-    last_message: text,
-    last_time:    timestamp,
-    unread:       supabase.rpc ? undefined : 0, // incremented separately
-  }, { onConflict: 'phone', ignoreDuplicates: false });
-
-  if (error) console.error('upsertThread error:', error.message);
-
-  // Increment unread for inbound
-  await supabase.rpc('increment_unread', { p_phone: phone }).catch(() => {});
+    phone:        chatId,
+    contact_name: visitorName || 'Visitor',
+    last_message: lastMsg     || '',
+    last_time:    ts,
+    unread:       0,
+  }, { onConflict: 'phone' });
+  if (error) console.error('upsertChat error:', error.message);
 }
 
-async function insertMessage(record) {
-  const { error } = await supabase.from('wa_messages').upsert(record, {
-    onConflict: 'id',
-    ignoreDuplicates: true,
-  });
-  if (error) console.error('insertMessage error:', error.message);
+async function insertMsg(chatId, msgId, senderName, senderType, text, ts) {
+  const { error } = await supabase.from('wa_messages').upsert({
+    id:        msgId,
+    phone:     chatId,
+    direction: senderType === 'agent' ? 'outbound' : 'inbound',
+    from_name: senderName || senderType,
+    text:      text || '',
+    type:      'text',
+    status:    'received',
+    timestamp: ts,
+    time_iso:  new Date(ts).toISOString(),
+  }, { onConflict: 'id', ignoreDuplicates: true });
+  if (error) console.error('insertMsg error:', error.message);
 }
 
-async function updateMessageStatus(id, status) {
-  const { error } = await supabase
-    .from('wa_messages')
-    .update({ status })
-    .eq('id', id);
-  if (error) console.error('updateMessageStatus error:', error.message);
-}
-
-// ─── WEBHOOK VERIFICATION ─────────────────────────────────────────────────────
-app.get('/webhook', (req, res) => {
-  const mode      = req.query['hub.mode'];
-  const token     = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-
-  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-    console.log('✅ Webhook verified by Meta');
-    return res.status(200).send(challenge);
-  }
-  console.log('❌ Verification failed');
-  res.sendStatus(403);
-});
-
-// ─── WEBHOOK EVENT RECEIVER ───────────────────────────────────────────────────
+// ─── TAWK.TO WEBHOOK ──────────────────────────────────────────────────────────
 app.post('/webhook', async (req, res) => {
-  const body = req.body;
-  lastWebhook = { received_at: new Date().toISOString(), body };
-  console.log('WEBHOOK:', JSON.stringify(body));
-  if (body.object !== 'whatsapp_business_account') return res.sendStatus(404);
+  const payload = req.body;
+  lastWebhook   = { received_at: new Date().toISOString(), payload };
+  console.log('TAWK EVENT:', payload.event, '| chat:', payload.chatId || payload.ticketId);
 
-  for (const entry of body.entry || []) {
-    for (const change of entry.changes || []) {
-      const value = change.value;
+  const event    = payload.event;
+  const chatId   = payload.chatId || payload.ticketId || ('ticket_' + Date.now());
+  const ts       = payload.time ? new Date(payload.time).getTime() : Date.now();
+  const visitor  = payload.visitor  || payload.requester || {};
+  const agent    = payload.agent    || {};
+  const property = payload.property || {};
 
-      // ── Inbound messages ─────────────────────────────────────────────────
-      if (value.messages) {
-        for (const msg of value.messages) {
-          const contact   = (value.contacts || []).find(c => c.wa_id === msg.from);
-          const name      = contact?.profile?.name || msg.from;
-          const timestamp = parseInt(msg.timestamp) * 1000;
+  try {
+    switch (event) {
 
-          let text = '';
-          switch (msg.type) {
-            case 'text':     text = msg.text?.body || '';                          break;
-            case 'image':    text = '📷 Image';                                    break;
-            case 'audio':    text = '🎤 Voice message';                            break;
-            case 'video':    text = '🎥 Video';                                    break;
-            case 'document': text = `📄 ${msg.document?.filename || 'Document'}`; break;
-            case 'location': text = '📍 Location';                                 break;
-            case 'sticker':  text = '🖼 Sticker';                                  break;
-            default:         text = `[${msg.type}]`;
-          }
-
-          await upsertThread(msg.from, name, text, timestamp);
-          await insertMessage({
-            id:        msg.id,
-            phone:     msg.from,
-            direction: 'inbound',
-            from_name: name,
-            text,
-            type:      msg.type,
-            status:    'received',
-            timestamp,
-            time_iso:  new Date(timestamp).toISOString(),
-          });
-
-          console.log(`📥 ${name} (${msg.from}): ${text}`);
-        }
+      case 'chat:start': {
+        await upsertChat(chatId, visitor.name, agent.name, 'Chat started', ts);
+        console.log(`💬 Chat started — ${visitor.name || 'Visitor'} | ${chatId}`);
+        break;
       }
 
-      // ── Outbound status updates ───────────────────────────────────────────
-      if (value.statuses) {
-        for (const status of value.statuses) {
-          await updateMessageStatus(status.id, status.status);
-          console.log(`📤 ${status.id} → ${status.status}`);
-        }
+      case 'chat:end': {
+        await supabase.from('wa_threads')
+          .update({ last_message: 'Chat ended', last_time: ts })
+          .eq('phone', chatId);
+        console.log(`🔚 Chat ended — ${chatId}`);
+        break;
       }
+
+      case 'chat:message': {
+        const msg        = payload.message || {};
+        const sender     = msg.sender      || {};
+        const senderType = sender.type     || 'visitor';
+        const senderName = sender.name     || (senderType === 'agent' ? (agent.name || 'Agent') : (visitor.name || 'Visitor'));
+        const text       = msg.text        || '';
+        const msgId      = msg.id          || `${chatId}_${ts}`;
+
+        await upsertChat(chatId, visitor.name || senderName, agent.name, text, ts);
+        await insertMsg(chatId, msgId, senderName, senderType, text, ts);
+        console.log(`📨 [${senderType}] ${senderName}: ${text.slice(0, 60)}`);
+        break;
+      }
+
+      case 'chat:agentAssigned':
+      case 'chat:agent_assigned': {
+        await supabase.from('wa_threads')
+          .update({ last_message: `Agent assigned: ${agent.name || '?'}`, last_time: ts })
+          .eq('phone', chatId);
+        console.log(`👤 Agent assigned: ${agent.name} → ${chatId}`);
+        break;
+      }
+
+      case 'ticket:create': {
+        const text  = payload.message || 'New ticket';
+        const msgId = `ticket_${chatId}_${ts}`;
+        await upsertChat(chatId, visitor.name, null, text, ts);
+        await insertMsg(chatId, msgId, visitor.name || 'Visitor', 'visitor', text, ts);
+        console.log(`🎫 Ticket — ${visitor.name || chatId}: ${text.slice(0, 60)}`);
+        break;
+      }
+
+      default:
+        console.log(`ℹ️  Unhandled event: ${event}`);
     }
+  } catch (e) {
+    console.error('Webhook handler error:', e.message);
   }
 
   res.sendStatus(200);
@@ -149,153 +139,69 @@ app.get('/api/conversations', async (req, res) => {
   if (error) return res.status(500).json({ ok: false, error: error.message });
 
   const conversations = (data || []).map(t => ({
-    thread_id:     t.phone,
-    contact_name:  t.contact_name,
-    phone:         t.phone,
-    last_message:  t.last_message,
-    last_time:     t.last_time,
-    unread:        t.unread,
+    thread_id:    t.phone,
+    contact_name: t.contact_name,
+    phone:        t.phone,
+    last_message: t.last_message,
+    last_time:    t.last_time,
+    unread:       t.unread,
   }));
 
   res.json({ ok: true, count: conversations.length, conversations });
 });
 
-// ─── API: Single thread messages ──────────────────────────────────────────────
-app.get('/api/conversations/:phone', async (req, res) => {
-  const phone = req.params.phone;
+// ─── API: Single conversation ──────────────────────────────────────────────────
+app.get('/api/conversations/:id', async (req, res) => {
+  const id = req.params.id;
 
   const [threadRes, msgsRes] = await Promise.all([
-    supabase.from('wa_threads').select('*').eq('phone', phone).single(),
-    supabase.from('wa_messages').select('*').eq('phone', phone).order('timestamp', { ascending: true }),
+    supabase.from('wa_threads').select('*').eq('phone', id).single(),
+    supabase.from('wa_messages').select('*').eq('phone', id).order('timestamp', { ascending: true }),
   ]);
 
   if (threadRes.error) return res.status(404).json({ ok: false, error: 'Not found' });
 
-  // Mark as read
-  await supabase.from('wa_threads').update({ unread: 0 }).eq('phone', phone);
+  await supabase.from('wa_threads').update({ unread: 0 }).eq('phone', id);
 
   res.json({
     ok: true,
-    conversation: {
-      ...threadRes.data,
-      messages: msgsRes.data || [],
-    },
+    conversation: { ...threadRes.data, messages: msgsRes.data || [] },
   });
 });
 
 // ─── API: Stats ───────────────────────────────────────────────────────────────
 app.get('/api/stats', async (req, res) => {
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const todayTs = today.getTime();
 
   const [threadsRes, totalRes, todayRes, unreadRes] = await Promise.all([
     supabase.from('wa_threads').select('phone', { count: 'exact', head: true }),
     supabase.from('wa_messages').select('id',   { count: 'exact', head: true }),
-    supabase.from('wa_messages').select('id',   { count: 'exact', head: true }).gte('timestamp', todayTs),
-    supabase.from('wa_threads') .select('unread').gt('unread', 0),
+    supabase.from('wa_messages').select('id',   { count: 'exact', head: true }).gte('timestamp', today.getTime()),
+    supabase.from('wa_threads').select('unread').gt('unread', 0),
   ]);
 
-  const unread = (unreadRes.data || []).reduce((sum, r) => sum + (r.unread || 0), 0);
+  const unread = (unreadRes.data || []).reduce((s, r) => s + (r.unread || 0), 0);
 
   res.json({
-    ok:               true,
-    total_messages:   totalRes.count   || 0,
-    today_messages:   todayRes.count   || 0,
-    total_contacts:   threadsRes.count || 0,
+    ok:             true,
+    total_messages: totalRes.count   || 0,
+    today_messages: todayRes.count   || 0,
+    total_contacts: threadsRes.count || 0,
     unread,
   });
 });
 
-// ─── API: Send message ────────────────────────────────────────────────────────
-app.post('/api/send', async (req, res) => {
-  const { phone, message } = req.body;
-  if (!phone || !message) return res.status(400).json({ ok: false, error: 'phone and message required' });
-  if (!PHONE_ID || !WA_TOKEN) return res.status(500).json({ ok: false, error: 'WhatsApp credentials not configured' });
-
-  try {
-    const response = await fetch(
-      `https://graph.facebook.com/v19.0/${PHONE_ID}/messages`,
-      {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${WA_TOKEN}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: phone,
-          type: 'text',
-          text: { body: message },
-        }),
-      }
-    );
-    const data = await response.json();
-    if (!response.ok) return res.status(400).json({ ok: false, error: data });
-
-    const msgId    = data.messages?.[0]?.id || Date.now().toString();
-    const timestamp = Date.now();
-
-    // Store outbound message
-    await supabase.from('wa_threads').upsert(
-      { phone, contact_name: phone, last_message: message, last_time: timestamp },
-      { onConflict: 'phone' }
-    );
-    await supabase.from('wa_messages').insert({
-      id: msgId, phone, direction: 'outbound', from_name: 'MK Malta Jobs',
-      text: message, type: 'text', status: 'sent', timestamp, time_iso: new Date(timestamp).toISOString(),
-    });
-
-    res.json({ ok: true, message_id: msgId });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// ─── LAST WEBHOOK ENDPOINT ────────────────────────────────────────────────────
-app.get('/last-webhook', (req, res) => {
-  res.json(lastWebhook || { message: 'No webhook received yet' });
-});
-
 // ─── DEBUG ────────────────────────────────────────────────────────────────────
-app.get('/debug', async (req, res) => {
-  // Test read
-  const { data, error: readErr, count } = await supabase
-    .from('wa_threads').select('*', { count: 'exact' });
-
-  // Test write
-  const { error: writeErr } = await supabase.from('wa_threads').upsert({
-    phone:        'debug_test',
-    contact_name: 'Debug Test',
-    last_message: 'write test at ' + new Date().toISOString(),
-    last_time:    Date.now(),
-    unread:       0,
-  }, { onConflict: 'phone' });
-
-  res.json({
-    supabase_url: SUPABASE_URL,
-    has_key:      !!SUPABASE_KEY,
-    read_error:   readErr?.message || null,
-    write_error:  writeErr?.message || null,
-    rows:         data,
-    count,
-  });
-});
+app.get('/last-webhook', (req, res) => res.json(lastWebhook || { message: 'No webhook received yet' }));
 
 // ─── HEALTH ───────────────────────────────────────────────────────────────────
 app.get('/', async (req, res) => {
-  const { count } = await supabase
-    .from('wa_threads')
-    .select('phone', { count: 'exact', head: true });
-  res.json({
-    service:      'MK Malta Jobs — WhatsApp Webhook',
-    status:       'running',
-    contacts:     count || 0,
-    supabase:     !!SUPABASE_URL,
-    whatsapp:     !!PHONE_ID && !!WA_TOKEN,
-  });
+  const { count } = await supabase.from('wa_threads').select('phone', { count: 'exact', head: true });
+  res.json({ service: 'MK Malta Jobs — tawk.to Webhook', status: 'running', chats: count || 0 });
 });
 
 // ─── START ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`\n✅ MK Malta Jobs WhatsApp Webhook — port ${PORT}`);
-  console.log(`   Supabase: ${SUPABASE_URL ? 'connected' : '⚠️  SUPABASE_URL not set'}`);
-  console.log(`   Webhook:  https://mk-malta.onrender.com/webhook`);
-  console.log(`   Token:    ${VERIFY_TOKEN}\n`);
+  console.log(`\n✅ MK Malta Jobs tawk.to Webhook — port ${PORT}`);
+  console.log(`   Webhook: https://mk-malta.onrender.com/webhook\n`);
 });

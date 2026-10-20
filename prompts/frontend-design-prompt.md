@@ -5,7 +5,7 @@ Two parts:
 - **Part A – Upgrade prompt.** Paste it into Claude Code inside any existing project. It audits the project, then improves it in phases.
 - **Part B – Standing standards.** Paste it into the project's `CLAUDE.md` so every future session follows the same rules.
 
-Replace anything in `[brackets]` before you paste.
+The project context is filled in for the MK Malta recruitment CRM. Change it to reuse the prompt in another project.
 
 ---
 
@@ -18,12 +18,22 @@ standard covering visual design, UX and motion. Do not rewrite the app from scra
 work with the existing stack, routes and data.
 
 ## Project context
-- Product: [what the app does, in one sentence]
-- Users: [who uses it, e.g. job seekers and employers in Malta]
-- Platform: [web / mobile (Expo) / both]
-- Brand feel (3 words): [e.g. trustworthy, warm, modern]
-- Reference apps I admire: [e.g. Linear, Airbnb, Revolut]
-- Hard constraints: [e.g. keep current URLs, must support English + Maltese, GDPR]
+- Product: MK Malta recruitment agency CRM. It manages candidates, work permits,
+  placements, client employers and payroll in one place.
+- Users: MK Malta recruiters and admin staff, who use it all day. Optimise for speed
+  and density: fast search, keyboard shortcuts, bulk actions, clear pipeline/status
+  views. It is a working tool, not a marketing site.
+- Platform: both. A web app (Next.js) for desk work, plus a mobile app (Expo) for
+  on-the-go updates. They share one design system and tokens.
+- Brand feel: trustworthy & professional, warm & human, modern & bold.
+- Reference apps I admire: Linear, Vercel and Stripe for crisp, fast, minimal craft and
+  subtle motion. Airbnb and Revolut for warm consumer polish and great mobile UX.
+- Hard constraints:
+  - GDPR. Candidate data (CVs, passports, work permits) is sensitive personal data.
+    Mask sensitive fields by default, never put personal data in URLs, logs or
+    analytics, and don't cache documents on device without encryption.
+  - Keep the existing Supabase database, schema and URLs, including the WhatsApp
+    webhook endpoint. UI changes must not break them.
 
 ## Phase 0 – Audit first (no code changes yet)
 1. Detect the stack: framework, styling, component library, animation library, routing.
@@ -136,6 +146,9 @@ or guide attention. Never decorate for its own sake. Fast is better than fancy.
 
 **Bar:** Elite, high-end product quality (Linear / Stripe / Apple level). Every UI change
 must meet these rules. When unsure, choose clarity and restraint over decoration.
+Brand feel: trustworthy & professional, warm & human, modern & bold. This is a
+recruiter-facing CRM, so put speed, density and clarity first.
+Candidate data is GDPR-sensitive: mask it by default and keep it out of URLs and logs.
 
 ### Tokens: never hard-code
 - Use design tokens for colour, type, spacing (4/8-point scale), radius, shadow and motion.
